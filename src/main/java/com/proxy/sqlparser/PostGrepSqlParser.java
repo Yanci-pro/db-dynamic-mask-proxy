@@ -116,6 +116,8 @@ public class PostGrepSqlParser extends DefaultSqlParser {
                 }
 
             }
+            //注意这里的结束位不能省略
+            readBuffer.writeByte(0);
             channel.writeAndFlush(readBuffer);
 
         } else {
