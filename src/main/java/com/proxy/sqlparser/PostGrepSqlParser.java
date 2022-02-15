@@ -5,12 +5,11 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
 
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * @description: some desc
@@ -22,9 +21,12 @@ import java.util.Objects;
  * 暂时没有处理中文格式问题，后续测试再处理
  * 现阶注意只支持具体sql语句，不支持*号的脱敏
  */
+@Slf4j
 public class PostGrepSqlParser extends DefaultSqlParser {
     String charset = "utf8";
     String rule = "concat(SUBSTR(#field#,1,CHAR_LENGTH(#field#)/2),substr('*************',CHAR_LENGTH(#field#)/2,CHAR_LENGTH(#field#)/2)) as #field#";
+    Map<String, ByteBuf> bufferMap = new HashMap();
+    Set<String> isWait = new HashSet<>();
 
     @Override
     public void dealChannel(ChannelHandlerContext ctx, ProxyConfig config, Channel channel, Object msg) {
@@ -34,25 +36,78 @@ public class PostGrepSqlParser extends DefaultSqlParser {
         String hostString = remoteAddress.getHostString();
         int remotePort = remoteAddress.getPort();
         if (Objects.equals(hostString, config.getRemoteAddr()) && Objects.equals(config.getRemotePort(), remotePort) && oldByteLength > 8) {
-            //取第一位，如果是80表示从jdbc和idea来的请求，数据复杂一点，如果是81表示从navicat和psql的客户端来的请求，结构稍微简单点
-            int startByte = readBuffer.getByte(0);
-            switch (startByte) {
-                case 80:
-                    dealComplex(channel, readBuffer);
-                    break;
-                case 81:
-                    dealSimple(channel, readBuffer);
-                    break;
-                default:
-                    readBuffer.retain();
-                    channel.writeAndFlush(readBuffer);
-                    break;
-            }
+            dealType(ctx, config, channel, msg);
         } else {
             channel.writeAndFlush(readBuffer);
-
         }
     }
+
+    public void dealType(ChannelHandlerContext ctx, ProxyConfig config, Channel channel, Object msg) {
+        ByteBuf readBuffer = (ByteBuf) msg;
+        //首先第一步看看第一位是不是80或81
+        byte startByte = readBuffer.getByte(0);
+        String localPid = channel.localAddress().toString();
+        if (startByte == 80 || startByte == 81 || isWait.contains(localPid)) {
+            //如果是服务端发送的消息远程地址为空
+            //只有发送给数据库的数据才需要进行处理
+            int readableBytes = readBuffer.readableBytes();
+            //第一步先获取会话的id,如果当前会话的pid没有被结束则直接把所有的数据写入到缓冲区buffer里面
+            if (bufferMap.containsKey(localPid)) {
+                ByteBuf byteBuf = bufferMap.get(localPid);
+                //如果写入完全了则直接进行sql解析
+                int index = readBuffer.writerIndex();
+                byte[] headerBytes = new byte[4];
+                byteBuf.getBytes(1, headerBytes);
+                //获取长度
+                byte[] tmpBytes = new byte[index];
+                readBuffer.getBytes(0, tmpBytes);
+                byteBuf.writeBytes(tmpBytes);
+                int readableBytesNew = byteBuf.readableBytes();
+                if (readableBytesNew >= byteBuf.writerIndex()) {
+                    dealBytes(ctx, config, channel, byteBuf);
+                    isWait.remove(localPid);
+                    bufferMap.remove(localPid);
+
+                }
+            } else {
+                //取第一位，如果是80表示从jdbc和idea来的请求，数据复杂一点，如果是81表示从navicat和psql的客户端来的请求，结构稍微简单点
+                byte aByte = readBuffer.getByte(0);
+                byte[] headerBytes = new byte[4];
+                readBuffer.getBytes(1, headerBytes);
+                //获取长度
+                int byteLength = getByteLength(headerBytes);
+                if (readableBytes >= byteLength) {
+                    dealBytes(ctx, config, channel, readBuffer);
+                } else {
+                    //说明数据包不完全，先继续接收数据包等接收完全后再处理sql
+                    ByteBuf tmpBuffer = Unpooled.buffer(byteLength);
+                    tmpBuffer.writeBytes(readBuffer);
+                    bufferMap.put(localPid, tmpBuffer);
+                    isWait.add(localPid);
+                }
+            }
+        } else {
+            readBuffer.retain();
+            channel.writeAndFlush(readBuffer);
+        }
+    }
+
+    public void dealBytes(ChannelHandlerContext ctx, ProxyConfig config, Channel channel, ByteBuf readBuffer) {
+        int startByte = readBuffer.getByte(0);
+        switch (startByte) {
+            case 80:
+                dealComplex(ctx, config, channel, readBuffer);
+                break;
+            case 81:
+                dealSimple(ctx, config, channel, readBuffer);
+                break;
+            default:
+                readBuffer.retain();
+                channel.writeAndFlush(readBuffer);
+                break;
+        }
+    }
+
 
     /**
      * 根据byte数组得到字符串长度
@@ -88,7 +143,7 @@ public class PostGrepSqlParser extends DefaultSqlParser {
      *
      * @param readBuffer
      */
-    void dealSimple(Channel channel, ByteBuf readBuffer) {
+    void dealSimple(ChannelHandlerContext ctx, ProxyConfig config, Channel channel, ByteBuf readBuffer) {
         int oldByteLength = readBuffer.readableBytes();
         byte headByte = readBuffer.getByte(0);
         byte[] headerBytes = new byte[4];
@@ -100,7 +155,7 @@ public class PostGrepSqlParser extends DefaultSqlParser {
         readBuffer.getBytes(5, oldSqlBytes);
         String oldSql = new String(oldSqlBytes);
         readBuffer.retain();
-        if (oldSql.toLowerCase().startsWith("select") && (!oldSql.toLowerCase().contains("information_schema"))) {
+        if (oldSql.toLowerCase().startsWith("select") && (!oldSql.toLowerCase().contains("information_schema")) && (!oldSql.contains("*"))) {
             String newSql = replaceSql(oldSql);
             byte[] newSqlBytes = newSql.getBytes();
             setHeaderBytes(newSqlBytes.length + 5, headerBytes);
@@ -122,6 +177,18 @@ public class PostGrepSqlParser extends DefaultSqlParser {
             readBuffer.writeByte(0);
             channel.writeAndFlush(readBuffer);
 
+        } else if (oldSql.toUpperCase(Locale.ROOT).startsWith("DELETE")) {
+            delete(ctx, config, channel, oldSql);
+            readBuffer.retain();
+            channel.writeAndFlush(readBuffer);
+        } else if (oldSql.toUpperCase(Locale.ROOT).startsWith("UPDATE")) {
+            update(ctx, config, channel, oldSql);
+            readBuffer.retain();
+            channel.writeAndFlush(readBuffer);
+        } else if (oldSql.toUpperCase(Locale.ROOT).startsWith("INSERT")) {
+            insert(ctx, config, channel, oldSql);
+            readBuffer.retain();
+            channel.writeAndFlush(readBuffer);
         } else {
             readBuffer.retain();
             channel.writeAndFlush(readBuffer);
@@ -149,8 +216,9 @@ public class PostGrepSqlParser extends DefaultSqlParser {
             }
             String join = StringUtils.join(list, ",");
             sql = "select" + " " + join + " " + sql.substring(form);
+            log.info("执行完sql替换即将执行的sql为:{}", sql);
         } catch (Exception e) {
-            System.out.println("错误sql:" + sql);
+            log.debug("替换sql失败,原sql为:{}", sql);
         }
         return sql;
 
@@ -162,7 +230,7 @@ public class PostGrepSqlParser extends DefaultSqlParser {
      *
      * @param readBuffer
      */
-    void dealComplex(Channel channel, ByteBuf readBuffer) {
+    void dealComplex(ChannelHandlerContext ctx, ProxyConfig config, Channel channel, ByteBuf readBuffer) {
         int oldByteLength = readBuffer.readableBytes();
 
         byte headByte = readBuffer.getByte(0);
@@ -187,7 +255,14 @@ public class PostGrepSqlParser extends DefaultSqlParser {
             readBuffer.writeByte(0);
             readBuffer.writeBytes(newSqlBytes);
             readBuffer.writeBytes(endBytes);
+        } else if (oldSql.toUpperCase(Locale.ROOT).startsWith("DELETE")) {
+            delete(ctx, config, channel, oldSql);
+        } else if (oldSql.toUpperCase(Locale.ROOT).startsWith("UPDATE")) {
+            update(ctx, config, channel, oldSql);
+        } else if (oldSql.toUpperCase(Locale.ROOT).startsWith("INSERT")) {
+            insert(ctx, config, channel, oldSql);
         }
+        readBuffer.readerIndex(0);
         channel.writeAndFlush(readBuffer);
     }
 }
