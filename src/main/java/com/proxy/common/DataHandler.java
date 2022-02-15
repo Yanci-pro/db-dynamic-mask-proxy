@@ -33,9 +33,6 @@ public class DataHandler extends ChannelHandlerAdapter {
             case oracle:
                 sqlParser = new OracleParser();
                 break;
-            case sqlserver:
-                sqlParser = new SqlServerParser();
-                break;
             default:
                 sqlParser = new DefaultSqlParser();
                 break;
