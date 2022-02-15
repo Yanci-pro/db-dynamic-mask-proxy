@@ -50,7 +50,7 @@ public class DataHandler extends ChannelHandlerAdapter {
      */
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
-        sqlParser.dealChannel(config,channel, msg);
+        sqlParser.dealChannel(ctx,config,channel, msg);
     }
 
     /**

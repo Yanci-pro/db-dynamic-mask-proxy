@@ -4,6 +4,9 @@ import com.proxy.common.ProxyServer;
 import com.proxy.constants.DBTypeEnum;
 import com.proxy.model.ProxyConfig;
 
+import java.io.InputStream;
+import java.util.*;
+
 /**
  * @description: some desc
  * @author: yx
@@ -11,38 +14,38 @@ import com.proxy.model.ProxyConfig;
  */
 public class App {
     public static void main(String[] args) {
-        ProxyConfig oracleConfig = new ProxyConfig();
-        oracleConfig.setRemoteAddr("172.16.*.*");
-        oracleConfig.setServerPort(6003);
-        oracleConfig.setRemotePort(1521);
-        oracleConfig.setDbType(DBTypeEnum.oracle);
-
-//        config.setRemoteaddr("172.16.*.*");
-//        config.setRemotePort(1521);
-////        config.setRemoteaddr("127.0.0.1");
-
-//        config.setRemotePort(7777);
-//
-////        config.setRemoteaddr("172.16.123.50");
-//        config.setRemoteaddr("172.16.120.114");
-
-        ProxyConfig sqlServerConfig = new ProxyConfig();
-        sqlServerConfig.setRemoteAddr("172.16.*.*");
-        sqlServerConfig.setRemotePort(1433);
-        sqlServerConfig.setServerPort(6003);
-        sqlServerConfig.setDbType(DBTypeEnum.sqlserver);
-
-        ProxyConfig postGrepSqlConfig = new ProxyConfig();
-        postGrepSqlConfig.setRemoteAddr("172.16.*.*");
-        postGrepSqlConfig.setRemotePort(5432);
-        postGrepSqlConfig.setServerPort(6004);
-        postGrepSqlConfig.setDbType(DBTypeEnum.postgresql);
-
-        ProxyConfig mySqlConfig = new ProxyConfig();
-        mySqlConfig.setRemoteAddr("172.16.*.*");
-        mySqlConfig.setRemotePort(3306);
-        mySqlConfig.setServerPort(6001);
-        mySqlConfig.setDbType(DBTypeEnum.mysql);
-        new ProxyServer(oracleConfig).init();
+        for (ProxyConfig proxyConfig : readFile("/config.properties")) {
+            new ProxyServer(proxyConfig).init();
+        }
     }
+
+    /**
+     * 获取配置文件
+     *
+     * @param name
+     * @return
+     */
+    public static List<ProxyConfig> readFile(String name) {
+        InputStream in = App.class.getResourceAsStream(name);
+        Properties properties = new Properties();
+        // 使用List来存储每行读取到的字符串
+        List<ProxyConfig> list = new ArrayList<>();
+        try {
+            properties.load(in);
+            Set<Map.Entry<Object, Object>> entries = properties.entrySet();
+            entries.forEach(item -> {
+                String value = String.valueOf(item.getValue());
+                String[] split = value.split(",");
+                String remoteAddr = split[0];
+                Integer remotePort = Integer.valueOf(split[1]);
+                Integer serverPort = Integer.valueOf(split[2]);
+                DBTypeEnum dbType = DBTypeEnum.valueOf(split[3]);
+                list.add(new ProxyConfig(serverPort, remoteAddr, remotePort, dbType));
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return list;
+    }
+
 }

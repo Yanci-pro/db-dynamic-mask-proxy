@@ -4,6 +4,7 @@ import com.proxy.model.ProxyConfig;
 import com.proxy.util.PrintUtil;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
 import org.apache.commons.lang.StringUtils;
 
 import java.net.InetSocketAddress;
@@ -66,7 +67,7 @@ public class SqlServerParser extends DefaultSqlParser {
     public static Charset defaultCharset = Charset.forName("gbk");
 
     @Override
-    public void dealChannel(ProxyConfig config, Channel channel, Object msg) {
+    public void dealChannel(ChannelHandlerContext ctx, ProxyConfig config, Channel channel, Object msg) {
 
         ByteBuf readBuffer = (ByteBuf) msg;
         //如果是服务端发送的消息远程地址为空

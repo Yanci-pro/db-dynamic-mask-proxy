@@ -4,6 +4,7 @@ import com.proxy.model.ProxyConfig;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
 import org.apache.commons.lang.StringUtils;
 
 import java.net.InetSocketAddress;
@@ -25,7 +26,8 @@ public class PostGrepSqlParser extends DefaultSqlParser {
     String charset = "utf8";
     String rule = "concat(SUBSTR(#field#,1,CHAR_LENGTH(#field#)/2),substr('*************',CHAR_LENGTH(#field#)/2,CHAR_LENGTH(#field#)/2)) as #field#";
 
-    public void dealChannel(ProxyConfig config, Channel channel, Object msg) {
+    @Override
+    public void dealChannel(ChannelHandlerContext ctx, ProxyConfig config, Channel channel, Object msg) {
         ByteBuf readBuffer = (ByteBuf) msg;
         int oldByteLength = readBuffer.readableBytes();
         InetSocketAddress remoteAddress = (InetSocketAddress) channel.remoteAddress();

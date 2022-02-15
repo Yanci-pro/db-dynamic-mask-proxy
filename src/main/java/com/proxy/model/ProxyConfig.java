@@ -13,6 +13,16 @@ public class ProxyConfig {
     private int remotePort;
     private DBTypeEnum dbType;
 
+    public ProxyConfig() {
+    }
+
+    public ProxyConfig(int serverPort, String remoteAddr, int remotePort, DBTypeEnum dbType) {
+        this.serverPort = serverPort;
+        this.remoteAddr = remoteAddr;
+        this.remotePort = remotePort;
+        this.dbType = dbType;
+    }
+
     public int getServerPort() {
         return serverPort;
     }
