@@ -1,7 +1,10 @@
 package com.proxy.common;
 
 import com.proxy.model.ProxyConfig;
-import com.proxy.sqlparser.*;
+import com.proxy.sqlparser.DefaultSqlParser;
+import com.proxy.sqlparser.MySqlParser;
+import com.proxy.sqlparser.OracleParser;
+import com.proxy.sqlparser.PostGrepSqlParser;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerAdapter;
@@ -24,6 +27,7 @@ public class DataHandler extends ChannelHandlerAdapter {
         this.channel = channel;
         this.config = config;
         switch (config.getDbType()) {
+            case maridb:
             case mysql:
                 sqlParser = new MySqlParser();
                 break;
